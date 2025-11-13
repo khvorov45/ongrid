@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head></head>
+
+<body style="background-color: black; color: white">
+<canvas id="canvas"></canvas>
+<div id="number">0</div>
+</body>
+
+<script>
+
+function main() {
+    const worldDimX = 500
+    const worldDimY = 500
+
+    const canvas = document.getElementById("canvas")
+    canvas.setAttribute("width", worldDimX)
+    canvas.setAttribute("height", worldDimY)
+
+    const ctx = canvas.getContext("2d")
+
+    const cellDimX = 50
+    const cellDimY = 50
+
+    // NOTE: grid
+    {
+        const cellBorderWidth = 1
+
+        const cellCountX = worldDimX / cellDimX
+        const cellCountY = worldDimY / cellDimY
+
+        {
+            const oldFillStyle = ctx.fillStyle
+            ctx.fillStyle = "gray"
+            {
+                let currentX = 0
+                for (let colIndex = 0; colIndex <= cellCountX; colIndex++) {
+                    ctx.fillRect(currentX - cellBorderWidth, 0, cellBorderWidth * 2, worldDimY)
+                    currentX += cellDimX
+                }
+            }
+            {
+                let currentY = 0
+                for (let rowIndex = 0; rowIndex <= cellCountX; rowIndex++) {
+                    ctx.fillRect(0, currentY - cellBorderWidth, worldDimX, cellBorderWidth * 2)
+                    currentY += cellDimY
+                }
+            }
+            ctx.fillStyle = oldFillStyle
+        }
+    }
+
+    // NOTE: number increaser
+    {
+        const posX = 4
+        const posY = 4
+
+        {
+            const left = posX * cellDimX
+            const top = posY * cellDimY
+
+            const oldFillStyle = ctx.fillStyle
+            ctx.fillStyle = "red"
+            ctx.fillRect(left, top, cellDimX, cellDimY)
+            ctx.fillStyle = oldFillStyle
+        }
+
+        canvas.addEventListener("click", (event) => {
+            const canvasRect = canvas.getBoundingClientRect()
+            const clickPosXPx = event.clientX - canvasRect.left
+            const clickPosYPx = event.clientY - canvasRect.top
+
+            const clickPosXCell = Math.floor(clickPosXPx / cellDimX)
+            const clickPosYCell = Math.floor(clickPosYPx / cellDimY)
+
+            if (clickPosXCell == posX && clickPosYCell == posY) {
+                const numberElement = document.getElementById("number")
+                const currentNumberText = numberElement.getHTML()
+                const currentNumber = parseInt(currentNumberText)
+                numberElement.setHTMLUnsafe(`${currentNumber + 1}`)
+            }
+        })
+    }
+}
+
+main()
+
+</script>
+
+</html>
