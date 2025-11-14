@@ -9,78 +9,118 @@
 
 <script>
 
-function main() {
-    const worldDimX = 500
-    const worldDimY = 500
+// NOTE: All dimensions are in world units where 1wu = 1 cell dim
+// unless specified otherwise (e.g., DimPx = dim in px)
+// Coordinates are top-down, left-right. 0 is the edge, not the center
+// All time is in ms
+let globalState = {
+    lastTimestamp: 0,
+    worldDim: {x: 10, y: 10},
+    cursor: {x: 0, y: 0},
+    numberIncreaser: {pos: {x: 3, y: 4}, sinceLastUpdate: 0, waitBeforeUpdate: 1000},
+    cellDimPx: 50,
+    gridCellBorderWidthPx: 1,
+}
 
-    const canvas = document.getElementById("canvas")
-    canvas.setAttribute("width", worldDimX)
-    canvas.setAttribute("height", worldDimY)
+function gameUpdateAndRender(timestamp) {
+    const deltaTime = timestamp - globalState.lastTimestamp
+    globalState.lastTimestamp = timestamp
 
+    // NOTE: Update
+
+    // NOTE: number increaser
+    {
+        const hMatch = Math.floor(globalState.cursor.x) == globalState.numberIncreaser.pos.x
+        const vMatch = Math.floor(globalState.cursor.y) == globalState.numberIncreaser.pos.y
+        const cursorIsOver = hMatch && vMatch
+        const beenLongEnough = globalState.numberIncreaser.sinceLastUpdate >= globalState.numberIncreaser.waitBeforeUpdate
+        if (cursorIsOver && beenLongEnough) {
+            const numberElement = document.getElementById("number")
+            const currentNumberText = numberElement.getHTML()
+            const currentNumber = parseInt(currentNumberText)
+            numberElement.setHTMLUnsafe(`${currentNumber + 1}`)
+            // NOTE: don't set to 0 for smoother rendering of associated elements
+            globalState.numberIncreaser.sinceLastUpdate -= globalState.numberIncreaser.waitBeforeUpdate
+        } else if (cursorIsOver) {
+            globalState.numberIncreaser.sinceLastUpdate += deltaTime
+        } else {
+            globalState.numberIncreaser.sinceLastUpdate = 0
+        }
+    }
+
+    // NOTE: Render
+
+    const canvas = document.getElementById("canvas")    
+    
+    const worldDimXPx = globalState.worldDim.x * globalState.cellDimPx
+    const worldDimYPx = globalState.worldDim.y * globalState.cellDimPx
+    canvas.setAttribute("width", worldDimXPx)
+    canvas.setAttribute("height", worldDimYPx)
+    
     const ctx = canvas.getContext("2d")
 
-    const cellDimX = 50
-    const cellDimY = 50
-
+    // NOTE: clear
+    ctx.fillStyle = "black"
+    ctx.fillRect(0, 0, worldDimXPx, worldDimYPx)
+    
     // NOTE: grid
     {
-        const cellBorderWidth = 1
-
-        const cellCountX = worldDimX / cellDimX
-        const cellCountY = worldDimY / cellDimY
-
-        {
-            const oldFillStyle = ctx.fillStyle
-            ctx.fillStyle = "gray"
-            {
-                let currentX = 0
-                for (let colIndex = 0; colIndex <= cellCountX; colIndex++) {
-                    ctx.fillRect(currentX - cellBorderWidth, 0, cellBorderWidth * 2, worldDimY)
-                    currentX += cellDimX
-                }
-            }
-            {
-                let currentY = 0
-                for (let rowIndex = 0; rowIndex <= cellCountX; rowIndex++) {
-                    ctx.fillRect(0, currentY - cellBorderWidth, worldDimX, cellBorderWidth * 2)
-                    currentY += cellDimY
-                }
-            }
-            ctx.fillStyle = oldFillStyle
+        ctx.fillStyle = "gray"
+        for (let currentXPx = 0; currentXPx <= worldDimXPx; currentXPx += globalState.cellDimPx) {
+            ctx.fillRect(currentXPx - globalState.gridCellBorderWidthPx, 0, globalState.gridCellBorderWidthPx * 2, worldDimYPx)
+        }
+        for (let currentYPx = 0; currentYPx <= worldDimYPx; currentYPx += globalState.cellDimPx) {
+            ctx.fillRect(0, currentYPx - globalState.gridCellBorderWidthPx, worldDimXPx, globalState.gridCellBorderWidthPx * 2)
         }
     }
 
     // NOTE: number increaser
     {
-        const posX = 4
-        const posY = 4
+        const cellLeftPx = globalState.numberIncreaser.pos.x * globalState.cellDimPx
+        const cellTopPx = globalState.numberIncreaser.pos.y * globalState.cellDimPx
 
-        {
-            const left = posX * cellDimX
-            const top = posY * cellDimY
+        ctx.fillStyle = "darkred"
+        ctx.fillRect(cellLeftPx, cellTopPx, globalState.cellDimPx, globalState.cellDimPx)
 
-            const oldFillStyle = ctx.fillStyle
-            ctx.fillStyle = "red"
-            ctx.fillRect(left, top, cellDimX, cellDimY)
-            ctx.fillStyle = oldFillStyle
-        }
+        ctx.fillStyle = "lightgreen"
+        ctx.fillText(`${Math.floor(globalState.numberIncreaser.sinceLastUpdate)}`, cellLeftPx, cellTopPx + globalState.cellDimPx)
 
-        canvas.addEventListener("click", (event) => {
-            const canvasRect = canvas.getBoundingClientRect()
-            const clickPosXPx = event.clientX - canvasRect.left
-            const clickPosYPx = event.clientY - canvasRect.top
+        const orbitingSquareDimPx = 3
+        const orbitingSquareHalfDimPx = orbitingSquareDimPx / 2
+        const orbitingSquarePaddingPx = 1
+        const cellHalfDim = globalState.cellDimPx / 2
+        const orbitRadiusPx = cellHalfDim - globalState.gridCellBorderWidthPx - orbitingSquarePaddingPx - orbitingSquareDimPx
 
-            const clickPosXCell = Math.floor(clickPosXPx / cellDimX)
-            const clickPosYCell = Math.floor(clickPosYPx / cellDimY)
+        const cellCenterXPx = cellLeftPx + cellHalfDim
+        const cellCenterYPx = cellTopPx + cellHalfDim
+        const proportionOfTimeWaited = globalState.numberIncreaser.sinceLastUpdate / globalState.numberIncreaser.waitBeforeUpdate
+        const currentAngleFromTop = proportionOfTimeWaited // NOTE: in turns, clockwise
+        const orbitingSquareOffsetXPx = Math.sin(currentAngleFromTop * 2 * Math.PI) * orbitRadiusPx
+        const orbitingSquareOffsetYPx = Math.cos(currentAngleFromTop * 2 * Math.PI) * orbitRadiusPx
+        const orbitingSquareCenterXPx = cellCenterXPx + orbitingSquareOffsetXPx
+        const orbitingSquareCenterYPx = cellCenterYPx - orbitingSquareOffsetYPx
 
-            if (clickPosXCell == posX && clickPosYCell == posY) {
-                const numberElement = document.getElementById("number")
-                const currentNumberText = numberElement.getHTML()
-                const currentNumber = parseInt(currentNumberText)
-                numberElement.setHTMLUnsafe(`${currentNumber + 1}`)
-            }
-        })
+        ctx.fillStyle = "lightgray"
+        ctx.fillRect(orbitingSquareCenterXPx - orbitingSquareHalfDimPx, orbitingSquareCenterYPx - orbitingSquareHalfDimPx, orbitingSquareDimPx, orbitingSquareDimPx)
     }
+
+    requestAnimationFrame(gameUpdateAndRender)
+}
+
+function main() {
+    // NOTE: Can't read input in real time lol
+    document.addEventListener("mousemove", (event) => {
+        const canvasRect = canvas.getBoundingClientRect()
+        const cursorXPx = event.clientX - canvasRect.left
+        const cursorYPx = event.clientY - canvasRect.top
+        globalState.cursor.x = cursorXPx / globalState.cellDimPx
+        globalState.cursor.y = cursorYPx / globalState.cellDimPx
+    })
+
+    requestAnimationFrame((timestamp) => {
+        globalState.lastTimestamp = timestamp
+        requestAnimationFrame(gameUpdateAndRender)
+    })
 }
 
 main()
