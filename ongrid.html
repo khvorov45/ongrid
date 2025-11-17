@@ -41,6 +41,7 @@ function gameUpdateAndRender(timestamp) {
             numberElement.setHTMLUnsafe(`${currentNumber + 1}`)
             // NOTE: don't set to 0 for smoother rendering of associated elements
             globalState.numberIncreaser.sinceLastUpdate -= globalState.numberIncreaser.waitBeforeUpdate
+            globalState.numberIncreaser.sinceLastUpdate += deltaTime
         } else if (cursorIsOver) {
             globalState.numberIncreaser.sinceLastUpdate += deltaTime
         } else {
