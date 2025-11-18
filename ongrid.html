@@ -16,8 +16,13 @@
 let globalState = {
     lastTimestamp: 0,
     worldDim: {x: 10, y: 10},
-    cursor: {x: 0, y: 0},
-    numberIncreaser: {pos: {x: 3, y: 4}, sinceLastUpdate: 0, waitBeforeUpdate: 1000},
+    cursor: {x: 0, y: 0, leftButtonDown: false},
+    entities: [
+        {kind: "producer", pos: {x: 3, y: 4}, cycleProgress: 0, currentRate: 0},
+        {kind: "motor", pos: {x: 2, y: 4}, cycleProgress: 0, currentRate: 0},
+        {kind: "generator", pos: {x: 1, y: 4}, cycleProgress: 0, currentRate: 0},
+    ],
+    referenceCycleDuration: 1000,
     cellDimPx: 50,
     gridCellBorderWidthPx: 1,
 }
@@ -28,25 +33,32 @@ function gameUpdateAndRender(timestamp) {
 
     // NOTE: Update
 
-    // NOTE: number increaser
-    {
-        const hMatch = Math.floor(globalState.cursor.x) == globalState.numberIncreaser.pos.x
-        const vMatch = Math.floor(globalState.cursor.y) == globalState.numberIncreaser.pos.y
-        const cursorIsOver = hMatch && vMatch
-        const beenLongEnough = globalState.numberIncreaser.sinceLastUpdate >= globalState.numberIncreaser.waitBeforeUpdate
-        if (cursorIsOver && beenLongEnough) {
-            const numberElement = document.getElementById("number")
-            const currentNumberText = numberElement.getHTML()
-            const currentNumber = parseInt(currentNumberText)
-            numberElement.setHTMLUnsafe(`${currentNumber + 1}`)
-            // NOTE: don't set to 0 for smoother rendering of associated elements
-            globalState.numberIncreaser.sinceLastUpdate -= globalState.numberIncreaser.waitBeforeUpdate
-            globalState.numberIncreaser.sinceLastUpdate += deltaTime
-        } else if (cursorIsOver) {
-            globalState.numberIncreaser.sinceLastUpdate += deltaTime
-        } else {
-            globalState.numberIncreaser.sinceLastUpdate = 0
+    // NOTE: Entities
+    for (let entityIndex = 0; entityIndex < globalState.entities.length; entityIndex++) {
+        const entity = globalState.entities[entityIndex]
+
+        switch (entity.kind) {
+            case "producer": {
+                const motor = globalState.entities.find(e => e.kind === "motor" && e.pos.x === entity.pos.x - 1 && e.pos.y === entity.pos.y)
+                const efficiency = 0.5
+                entity.currentRate = motor.currentRate * efficiency
+            } break
+            case "motor": {
+                const generator = globalState.entities.find(e => e.kind === "generator" && e.pos.x === entity.pos.x - 1 && e.pos.y === entity.pos.y)
+                const efficiency = 0.8
+                entity.currentRate = generator.currentRate * efficiency
+            } break
+            case "generator": {
+                const isCursorOver = Math.floor(globalState.cursor.x) === entity.pos.x && Math.floor(globalState.cursor.y) === entity.pos.y
+                entity.currentRate = isCursorOver && globalState.cursor.leftButtonDown ? 1 : 0
+            } break
+            default: console.error(`unknown entity type: '${entity.kind}'`)
         }
+
+        while (entity.cycleProgress >= 1) {
+            entity.cycleProgress -= 1
+        }
+        entity.cycleProgress += deltaTime / globalState.referenceCycleDuration * entity.currentRate
     }
 
     // NOTE: Render
@@ -60,11 +72,11 @@ function gameUpdateAndRender(timestamp) {
     
     const ctx = canvas.getContext("2d")
 
-    // NOTE: clear
+    // NOTE: Clear
     ctx.fillStyle = "black"
     ctx.fillRect(0, 0, worldDimXPx, worldDimYPx)
     
-    // NOTE: grid
+    // NOTE: Grid
     {
         ctx.fillStyle = "gray"
         for (let currentXPx = 0; currentXPx <= worldDimXPx; currentXPx += globalState.cellDimPx) {
@@ -75,16 +87,41 @@ function gameUpdateAndRender(timestamp) {
         }
     }
 
-    // NOTE: number increaser
-    {
-        const cellLeftPx = globalState.numberIncreaser.pos.x * globalState.cellDimPx
-        const cellTopPx = globalState.numberIncreaser.pos.y * globalState.cellDimPx
+    // NOTE: Entities
+    for (let entityIndex = 0; entityIndex < globalState.entities.length; entityIndex++) {
+        const entity = globalState.entities[entityIndex]
 
-        ctx.fillStyle = "darkred"
+        let cellBg = "magenta"
+        let letter = "X"
+        switch (entity.kind) {
+            case "producer": {
+                cellBg = "darkred"
+                letter = "P"
+            } break
+            case "motor": {
+                cellBg = "green"
+                letter = "M"
+            } break
+            case "generator": {
+                cellBg = "darkblue"
+                letter = "G"
+            } break
+            default: console.error(`unknown entity type: '${entity.kind}'`)
+        }
+
+        const cellLeftPx = entity.pos.x * globalState.cellDimPx
+        const cellTopPx = entity.pos.y * globalState.cellDimPx
+
+        ctx.fillStyle = cellBg
         ctx.fillRect(cellLeftPx, cellTopPx, globalState.cellDimPx, globalState.cellDimPx)
 
-        ctx.fillStyle = "lightgreen"
-        ctx.fillText(`${Math.floor(globalState.numberIncreaser.sinceLastUpdate)}`, cellLeftPx, cellTopPx + globalState.cellDimPx)
+        ctx.fillStyle = "white"
+        ctx.textBaseline = "bottom"
+        ctx.fillText(`${Math.floor(entity.cycleProgress * 100)}`, cellLeftPx, cellTopPx + globalState.cellDimPx)
+
+        ctx.fillStyle = "black"
+        ctx.textBaseline = "top"
+        ctx.fillText(letter, cellLeftPx, cellTopPx)
 
         const orbitingSquareDimPx = 3
         const orbitingSquareHalfDimPx = orbitingSquareDimPx / 2
@@ -94,7 +131,7 @@ function gameUpdateAndRender(timestamp) {
 
         const cellCenterXPx = cellLeftPx + cellHalfDim
         const cellCenterYPx = cellTopPx + cellHalfDim
-        const proportionOfTimeWaited = globalState.numberIncreaser.sinceLastUpdate / globalState.numberIncreaser.waitBeforeUpdate
+        const proportionOfTimeWaited = entity.cycleProgress
         const currentAngleFromTop = proportionOfTimeWaited // NOTE: in turns, clockwise
         const orbitingSquareOffsetXPx = Math.sin(currentAngleFromTop * 2 * Math.PI) * orbitRadiusPx
         const orbitingSquareOffsetYPx = Math.cos(currentAngleFromTop * 2 * Math.PI) * orbitRadiusPx
@@ -116,6 +153,18 @@ function main() {
         const cursorYPx = event.clientY - canvasRect.top
         globalState.cursor.x = cursorXPx / globalState.cellDimPx
         globalState.cursor.y = cursorYPx / globalState.cellDimPx
+    })
+
+    document.addEventListener("mousedown", (event) => {
+        if (event.button === 0) {
+            globalState.cursor.leftButtonDown = true
+        }
+    })
+
+    document.addEventListener("mouseup", (event) => {
+        if (event.button === 0) {
+            globalState.cursor.leftButtonDown = false
+        }
     })
 
     requestAnimationFrame((timestamp) => {
