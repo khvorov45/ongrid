@@ -17,14 +17,86 @@ let globalState = {
     lastTimestamp: 0,
     worldDim: {x: 10, y: 10},
     cursor: {x: 0, y: 0, leftButtonDown: false},
-    entities: [
-        {kind: "producer", pos: {x: 3, y: 4}, cycleProgress: 0, currentRate: 0},
-        {kind: "motor", pos: {x: 2, y: 4}, cycleProgress: 0, currentRate: 0},
-        {kind: "generator", pos: {x: 1, y: 4}, cycleProgress: 0, currentRate: 0},
-    ],
+    entities: {
+        storage: [],
+    },
     referenceCycleDuration: 1000,
     cellDimPx: 50,
     gridCellBorderWidthPx: 1,
+}
+
+function posIsInBounds(posX, posY) {
+    const result = posX >= 0 && posX < globalState.worldDim.x && posY >= 0 && posY < globalState.worldDim.y
+    return result
+}
+
+function getEntityHandleAtPos(posX, posY) {
+    const handle = {valid: false, index: 0}
+    if (posIsInBounds(posX, posY)) {
+        handle.valid = true
+        handle.index = posY * globalState.worldDim.x + posX
+    }
+    return handle
+}
+
+function getEntityPos(handle) {
+    const pos = {valid: false, x: 0, y: 0};
+    if (handle.valid) {
+        pos.valid = true
+        pos.x = handle.index % globalState.worldDim.x
+        pos.y = Math.floor(handle.index / globalState.worldDim.x)
+    }
+    return pos
+}
+
+function getEntityUnsafe(handle) {
+    entity = globalState.entities.storage[handle.index]
+    return entity
+}
+
+function startWorkingConditionally(handle, condition, efficiency) {
+    if (handle.valid) {
+        const entity = getEntityUnsafe(handle)
+        entity.currentRate = 0
+        const pos = getEntityPos(handle)
+        const entityOnLeftHandle = getEntityHandleAtPos(pos.x - 1, pos.y)
+        if (entityOnLeftHandle.valid) {
+            const entityOnLeft = getEntityUnsafe(entityOnLeftHandle)        
+            entity.currentRate = entityOnLeft.currentRate * efficiency
+        }
+    }    
+}
+
+function beginEntityIteration() {
+    const iterator = {pos: {x: -1, y: 0}, handle: null, entity: null, done: false}
+    return iterator
+}
+
+function nextEntity(iterator) {
+    if (!iterator.done) {
+        iterator.pos.x += 1
+        if (iterator.pos.x >= globalState.worldDim.x) {
+            iterator.pos.x = 0
+            iterator.pos.y += 1
+            if (iterator.pos.y >= globalState.worldDim.y) {
+                iterator.done = true
+                iterator.handle = null
+                iterator.entity = null
+            }
+        }
+        if (!iterator.done) {
+            iterator.handle = getEntityHandleAtPos(iterator.pos.x, iterator.pos.y)
+            iterator.entity = getEntityUnsafe(iterator.handle)
+        }
+    }
+    return iterator
+}
+
+function nextNonNullEntity(iterator) {
+    do {
+        nextEntity(iterator)
+    } while (!iterator.done && iterator.entity.kind === "none")
+    return iterator
 }
 
 function gameUpdateAndRender(timestamp) {
@@ -34,22 +106,18 @@ function gameUpdateAndRender(timestamp) {
     // NOTE: Update
 
     // NOTE: Entities
-    for (let entityIndex = 0; entityIndex < globalState.entities.length; entityIndex++) {
-        const entity = globalState.entities[entityIndex]
-
+    for (const entityIterator = nextNonNullEntity(beginEntityIteration()); !entityIterator.done; nextNonNullEntity(entityIterator)) {
+        const entity = entityIterator.entity
+        const pos = entityIterator.pos
         switch (entity.kind) {
             case "producer": {
-                const motor = globalState.entities.find(e => e.kind === "motor" && e.pos.x === entity.pos.x - 1 && e.pos.y === entity.pos.y)
-                const efficiency = 0.5
-                entity.currentRate = motor.currentRate * efficiency
+                startWorkingConditionally(entityIterator.handle, "motor", 0.8)
             } break
             case "motor": {
-                const generator = globalState.entities.find(e => e.kind === "generator" && e.pos.x === entity.pos.x - 1 && e.pos.y === entity.pos.y)
-                const efficiency = 0.8
-                entity.currentRate = generator.currentRate * efficiency
+                startWorkingConditionally(entityIterator.handle, "generator", 0.5)
             } break
             case "generator": {
-                const isCursorOver = Math.floor(globalState.cursor.x) === entity.pos.x && Math.floor(globalState.cursor.y) === entity.pos.y
+                const isCursorOver = Math.floor(globalState.cursor.x) === pos.x && Math.floor(globalState.cursor.y) === pos.y
                 entity.currentRate = isCursorOver && globalState.cursor.leftButtonDown ? 1 : 0
             } break
             default: console.error(`unknown entity type: '${entity.kind}'`)
@@ -88,8 +156,9 @@ function gameUpdateAndRender(timestamp) {
     }
 
     // NOTE: Entities
-    for (let entityIndex = 0; entityIndex < globalState.entities.length; entityIndex++) {
-        const entity = globalState.entities[entityIndex]
+    for (const entityIterator = nextNonNullEntity(beginEntityIteration()); !entityIterator.done; nextNonNullEntity(entityIterator)) {
+        const entity = entityIterator.entity
+        const pos = entityIterator.pos
 
         let cellBg = "magenta"
         let letter = "X"
@@ -109,8 +178,8 @@ function gameUpdateAndRender(timestamp) {
             default: console.error(`unknown entity type: '${entity.kind}'`)
         }
 
-        const cellLeftPx = entity.pos.x * globalState.cellDimPx
-        const cellTopPx = entity.pos.y * globalState.cellDimPx
+        const cellLeftPx = pos.x * globalState.cellDimPx
+        const cellTopPx = pos.y * globalState.cellDimPx
 
         ctx.fillStyle = cellBg
         ctx.fillRect(cellLeftPx, cellTopPx, globalState.cellDimPx, globalState.cellDimPx)
@@ -142,11 +211,16 @@ function gameUpdateAndRender(timestamp) {
         ctx.fillRect(orbitingSquareCenterXPx - orbitingSquareHalfDimPx, orbitingSquareCenterYPx - orbitingSquareHalfDimPx, orbitingSquareDimPx, orbitingSquareDimPx)
     }
 
+    // for (let entityIndex = 1; entityIndex < globalState.entities.length; entityIndex++) {
+    //     const entity = globalState.entities[entityIndex]        
+    // }
+
     requestAnimationFrame(gameUpdateAndRender)
 }
 
 function main() {
-    // NOTE: Can't read input in real time lol
+
+    // NOTE: Input
     document.addEventListener("mousemove", (event) => {
         const canvasRect = canvas.getBoundingClientRect()
         const cursorXPx = event.clientX - canvasRect.left
@@ -167,6 +241,42 @@ function main() {
         }
     })
 
+    // NOTE: Init
+    {
+        const entityCount = globalState.worldDim.x * globalState.worldDim.y
+        for (let entityIndex = 0; entityIndex < entityCount; entityIndex++) {
+            globalState.entities.storage.push({
+                kind: "none",
+                currentRate: 0,
+                cycleProgress: 0,
+            })
+        }
+
+        // NOTE: Temp setup some test entities
+        {
+            const handle = getEntityHandleAtPos(0, 5)
+            if (handle.valid) {
+                const entity = getEntityUnsafe(handle)
+                entity.kind = "generator"
+            }
+        }
+        {
+            const handle = getEntityHandleAtPos(1, 5)
+            if (handle.valid) {
+                const entity = getEntityUnsafe(handle)
+                entity.kind = "motor"
+            }
+        }
+        {
+            const handle = getEntityHandleAtPos(2, 5)
+            if (handle.valid) {
+                const entity = getEntityUnsafe(handle)
+                entity.kind = "producer"
+            }
+        }
+    }
+
+    // NOTE: Mainloop
     requestAnimationFrame((timestamp) => {
         globalState.lastTimestamp = timestamp
         requestAnimationFrame(gameUpdateAndRender)
