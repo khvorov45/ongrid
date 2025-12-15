@@ -33,39 +33,29 @@ type GameState = {
     referenceCycleDuration: number,
     cellDimPx: number,
     gridCellBorderWidthPx: number,
+    worldMargins: {top: number, bottom: number, left: number, right: number},
+    currentNumber: number,
 }
 
-let globalState: GameState = {
-    lastTimestamp: 0,
-    worldDim: {x: 10, y: 10},
-    cursor: {pos: {x: 0, y: 0}, leftButtonDown: false},
-    entities: {
-        storage: [],
-    },
-    referenceCycleDuration: 1000,
-    cellDimPx: 50,
-    gridCellBorderWidthPx: 1,
-}
-
-function posIsInBounds(pos: v2): boolean {
-    const result = pos.x >= 0 && pos.x < globalState.worldDim.x && pos.y >= 0 && pos.y < globalState.worldDim.y
+function posIsInBounds(pos: v2, bounds: v2): boolean {
+    const result = pos.x >= 0 && pos.x < bounds.x && pos.y >= 0 && pos.y < bounds.y
     return result
 }
 
-function getEntityHandleAtPos(pos: v2): EntityHandle {
+function getEntityHandleAtPos(gameState: GameState, pos: v2): EntityHandle {
     const handle: EntityHandle = {index: 0, pos: {x: 0, y: 0}, entity: null};
-    if (posIsInBounds(pos)) {
-        handle.index = pos.y * globalState.worldDim.x + pos.x
+    if (posIsInBounds(pos, gameState.worldDim)) {
+        handle.index = pos.y * gameState.worldDim.x + pos.x
         handle.pos = pos
-        handle.entity = globalState.entities.storage[handle.index]
+        handle.entity = gameState.entities.storage[handle.index]
     }
     return handle
 }
 
-function startWorkingConditionally(handle: EntityHandle, condition: EntityKind, efficiency: number): void {
+function startWorkingConditionally(gameState: GameState, handle: EntityHandle, condition: EntityKind, efficiency: number): void {
     if (handle.entity !== null) {
         handle.entity.currentRate = 0
-        const entityOnLeftHandle = getEntityHandleAtPos({x: handle.pos.x - 1, y: handle.pos.y})
+        const entityOnLeftHandle = getEntityHandleAtPos(gameState, {x: handle.pos.x - 1, y: handle.pos.y})
         if (entityOnLeftHandle.entity !== null && entityOnLeftHandle.entity.kind === condition) {
             handle.entity.currentRate = entityOnLeftHandle.entity.currentRate * efficiency
         }
@@ -76,26 +66,27 @@ type EntityIterator = {
     handle: EntityHandle | null,
     iterPos: v2,
     done: boolean,
+    gameState: GameState,
 }
 
-function beginEntityIteration(): EntityIterator {
-    const iterator: EntityIterator = {handle: null, iterPos: {x: -1, y: 0}, done: false}
+function beginEntityIteration(gameState: GameState): EntityIterator {
+    const iterator: EntityIterator = {handle: null, iterPos: {x: -1, y: 0}, done: false, gameState: gameState}
     return iterator
 }
 
 function nextEntity(iterator: EntityIterator): EntityIterator {
     if (!iterator.done) {
         iterator.iterPos.x += 1
-        if (iterator.iterPos.x >= globalState.worldDim.x) {
+        if (iterator.iterPos.x >= iterator.gameState.worldDim.x) {
             iterator.iterPos.x = 0
             iterator.iterPos.y += 1
-            if (iterator.iterPos.y >= globalState.worldDim.y) {
+            if (iterator.iterPos.y >= iterator.gameState.worldDim.y) {
                 iterator.done = true
                 iterator.handle = null
             }
         }
         if (!iterator.done) {
-            iterator.handle = getEntityHandleAtPos(iterator.iterPos)
+            iterator.handle = getEntityHandleAtPos(iterator.gameState, iterator.iterPos)
         }
     }
     return iterator
@@ -108,26 +99,25 @@ function nextNonNullEntity(iterator: EntityIterator): EntityIterator {
     return iterator
 }
 
-function gameUpdateAndRender(timestamp: number): void {
-    const deltaTime = timestamp - globalState.lastTimestamp
-    globalState.lastTimestamp = timestamp
+function gameUpdateAndRender(gameState: GameState, deltaTime: number): void {
 
-    // NOTE: Update
-
-    // NOTE: Entities
-    for (const entityIterator = nextNonNullEntity(beginEntityIteration()); !entityIterator.done; nextNonNullEntity(entityIterator)) {
+    // NOTE: Update Entities
+    for (const entityIterator = nextNonNullEntity(beginEntityIteration(gameState)); !entityIterator.done; nextNonNullEntity(entityIterator)) {
         const entity = entityIterator.handle!.entity!
         switch (entity.kind) {
             case EntityKind.Producer: {
-                startWorkingConditionally(entityIterator.handle!, EntityKind.Motor, 0.8)
+                startWorkingConditionally(gameState, entityIterator.handle!, EntityKind.Motor, 0.8)
+                gameState.currentNumber += entity.currentRate * deltaTime / gameState.referenceCycleDuration
             } break
             case EntityKind.Motor: {
-                startWorkingConditionally(entityIterator.handle!, EntityKind.Generator, 0.5)
+                startWorkingConditionally(gameState, entityIterator.handle!, EntityKind.Generator, 0.5)
             } break
             case EntityKind.Generator: {
                 const pos = entityIterator.handle!.pos
-                const isCursorOver = Math.floor(globalState.cursor.pos.x) === pos.x && Math.floor(globalState.cursor.pos.y) === pos.y
-                entity.currentRate = isCursorOver && globalState.cursor.leftButtonDown ? 1 : 0
+                const isCursorOverX = Math.floor((gameState.cursor.pos.x - gameState.worldMargins.left) / gameState.cellDimPx) === pos.x
+                const isCursorOverY = Math.floor((gameState.cursor.pos.y - gameState.worldMargins.top) / gameState.cellDimPx) === pos.y
+                const isCursorOver = isCursorOverX && isCursorOverY
+                entity.currentRate = isCursorOver && gameState.cursor.leftButtonDown ? 1 : 0
             } break
             default: console.error(`unknown entity type: '${entity.kind}'`)
         }
@@ -135,37 +125,65 @@ function gameUpdateAndRender(timestamp: number): void {
         while (entity.cycleProgress >= 1) {
             entity.cycleProgress -= 1
         }
-        entity.cycleProgress += deltaTime / globalState.referenceCycleDuration * entity.currentRate
+        entity.cycleProgress += deltaTime / gameState.referenceCycleDuration * entity.currentRate
     }
 
     // NOTE: Render
 
     const canvas = document.getElementById("canvas")! as HTMLCanvasElement
 
-    const worldDimXPx = globalState.worldDim.x * globalState.cellDimPx
-    const worldDimYPx = globalState.worldDim.y * globalState.cellDimPx
-    canvas.setAttribute("width", `${worldDimXPx}`)
-    canvas.setAttribute("height", `${worldDimYPx}`)
+    const worldDimXPx = gameState.worldDim.x * gameState.cellDimPx
+    const worldDimYPx = gameState.worldDim.y * gameState.cellDimPx
+
+    const canvasTotalHeightPx = worldDimYPx + gameState.worldMargins.top + gameState.worldMargins.bottom
+    const canvasTotalWidthPx = worldDimXPx + gameState.worldMargins.left + gameState.worldMargins.right
+
+    canvas.setAttribute("width", `${canvasTotalWidthPx}`)
+    canvas.setAttribute("height", `${canvasTotalHeightPx}`)
+
+    const worldDimLeftPx = gameState.worldMargins.left
+    const worldDimTopPx = gameState.worldMargins.top
+    const worldDimRightPx = worldDimLeftPx + worldDimXPx
+    const worldDimBottomPx = worldDimTopPx + worldDimYPx
 
     const ctx = canvas.getContext("2d")!
 
     // NOTE: Clear
     ctx.fillStyle = "black"
-    ctx.fillRect(0, 0, worldDimXPx, worldDimYPx)
+    ctx.fillRect(0, 0, canvasTotalWidthPx, canvasTotalHeightPx)
 
     // NOTE: Grid
     {
         ctx.fillStyle = "gray"
-        for (let currentXPx = 0; currentXPx <= worldDimXPx; currentXPx += globalState.cellDimPx) {
-            ctx.fillRect(currentXPx - globalState.gridCellBorderWidthPx, 0, globalState.gridCellBorderWidthPx * 2, worldDimYPx)
+        for (let currentXPx = worldDimLeftPx; currentXPx <= worldDimRightPx; currentXPx += gameState.cellDimPx) {
+            ctx.fillRect(currentXPx - gameState.gridCellBorderWidthPx, worldDimTopPx, gameState.gridCellBorderWidthPx * 2, worldDimYPx)
         }
-        for (let currentYPx = 0; currentYPx <= worldDimYPx; currentYPx += globalState.cellDimPx) {
-            ctx.fillRect(0, currentYPx - globalState.gridCellBorderWidthPx, worldDimXPx, globalState.gridCellBorderWidthPx * 2)
+        for (let currentYPx = worldDimTopPx; currentYPx <= worldDimBottomPx; currentYPx += gameState.cellDimPx) {
+            ctx.fillRect(worldDimLeftPx, currentYPx - gameState.gridCellBorderWidthPx, worldDimXPx, gameState.gridCellBorderWidthPx * 2)
         }
     }
 
-    // NOTE: Entities
-    for (const entityIterator = nextNonNullEntity(beginEntityIteration()); !entityIterator.done; nextNonNullEntity(entityIterator)) {
+    // NOTE: Margins
+    {
+        ctx.fillStyle = "#222222"
+        ctx.fillRect(0, 0, canvasTotalWidthPx, gameState.worldMargins.top)
+        ctx.fillRect(0, worldDimBottomPx, canvasTotalWidthPx, gameState.worldMargins.bottom)
+        ctx.fillRect(0, 0, gameState.worldMargins.left, canvasTotalHeightPx)
+        ctx.fillRect(worldDimRightPx, 0, gameState.worldMargins.right, canvasTotalHeightPx)
+    }
+
+    // NOTE: Number
+    {
+        const topMarginCenterXPx = gameState.worldMargins.left + worldDimXPx / 2
+        ctx.fillStyle = "white"
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        ctx.font = `${gameState.worldMargins.top}px monospace`
+        ctx.fillText(`${Math.floor(gameState.currentNumber)}`, topMarginCenterXPx, gameState.worldMargins.top / 2)
+    }
+
+    // NOTE: Render Entities
+    for (const entityIterator = nextNonNullEntity(beginEntityIteration(gameState)); !entityIterator.done; nextNonNullEntity(entityIterator)) {
         const entity = entityIterator.handle!.entity!
         const pos = entityIterator.handle!.pos
 
@@ -187,25 +205,30 @@ function gameUpdateAndRender(timestamp: number): void {
             default: console.error(`unknown entity type: '${entity.kind}'`)
         }
 
-        const cellLeftPx = pos.x * globalState.cellDimPx
-        const cellTopPx = pos.y * globalState.cellDimPx
+        const cellLeftPx = worldDimLeftPx + pos.x * gameState.cellDimPx + gameState.gridCellBorderWidthPx
+        const cellTopPx = worldDimTopPx + pos.y * gameState.cellDimPx + gameState.gridCellBorderWidthPx
+        const cellDimPx = gameState.cellDimPx - gameState.gridCellBorderWidthPx * 2
 
         ctx.fillStyle = cellBg
-        ctx.fillRect(cellLeftPx, cellTopPx, globalState.cellDimPx, globalState.cellDimPx)
+        ctx.fillRect(cellLeftPx, cellTopPx, cellDimPx, cellDimPx)
 
         ctx.fillStyle = "white"
         ctx.textBaseline = "bottom"
-        ctx.fillText(`${Math.floor(entity.cycleProgress * 100)}`, cellLeftPx, cellTopPx + globalState.cellDimPx)
+        ctx.textAlign = "left"
+        ctx.font = `10px monospace`
+        ctx.fillText(`${Math.floor(entity.cycleProgress * 100)}`, cellLeftPx, cellTopPx + cellDimPx)
 
         ctx.fillStyle = "black"
         ctx.textBaseline = "top"
+        ctx.textAlign = "left"
+        ctx.font = `20px monospace`
         ctx.fillText(letter, cellLeftPx, cellTopPx)
 
         const orbitingSquareDimPx = 3
         const orbitingSquareHalfDimPx = orbitingSquareDimPx / 2
         const orbitingSquarePaddingPx = 1
-        const cellHalfDim = globalState.cellDimPx / 2
-        const orbitRadiusPx = cellHalfDim - globalState.gridCellBorderWidthPx - orbitingSquarePaddingPx - orbitingSquareDimPx
+        const cellHalfDim = cellDimPx / 2
+        const orbitRadiusPx = cellHalfDim - orbitingSquarePaddingPx - orbitingSquareDimPx
 
         const cellCenterXPx = cellLeftPx + cellHalfDim
         const cellCenterYPx = cellTopPx + cellHalfDim
@@ -219,11 +242,23 @@ function gameUpdateAndRender(timestamp: number): void {
         ctx.fillStyle = "lightgray"
         ctx.fillRect(orbitingSquareCenterXPx - orbitingSquareHalfDimPx, orbitingSquareCenterYPx - orbitingSquareHalfDimPx, orbitingSquareDimPx, orbitingSquareDimPx)
     }
-
-    requestAnimationFrame(gameUpdateAndRender)
 }
 
 function main() {
+        
+    let gameState: GameState = {
+        lastTimestamp: 0,
+        worldDim: {x: 10, y: 10},
+        cursor: {pos: {x: 0, y: 0}, leftButtonDown: false},
+        entities: {
+            storage: [],
+        },
+        referenceCycleDuration: 1000,
+        cellDimPx: 50,
+        gridCellBorderWidthPx: 1,
+        worldMargins: {top: 20, bottom: 30, left: 40, right: 50},
+        currentNumber: 0,
+    }
 
     // NOTE: Input
     document.addEventListener("mousemove", (event) => {
@@ -231,27 +266,27 @@ function main() {
         const canvasRect = canvas.getBoundingClientRect()
         const cursorXPx = event.clientX - canvasRect.left
         const cursorYPx = event.clientY - canvasRect.top
-        globalState.cursor.pos.x = cursorXPx / globalState.cellDimPx
-        globalState.cursor.pos.y = cursorYPx / globalState.cellDimPx
+        gameState.cursor.pos.x = cursorXPx
+        gameState.cursor.pos.y = cursorYPx
     })
 
     document.addEventListener("mousedown", (event) => {
         if (event.button === 0) {
-            globalState.cursor.leftButtonDown = true
+            gameState.cursor.leftButtonDown = true
         }
     })
 
     document.addEventListener("mouseup", (event) => {
         if (event.button === 0) {
-            globalState.cursor.leftButtonDown = false
+            gameState.cursor.leftButtonDown = false
         }
     })
 
     // NOTE: Init
     {
-        const entityCount = globalState.worldDim.x * globalState.worldDim.y
+        const entityCount = gameState.worldDim.x * gameState.worldDim.y
         for (let entityIndex = 0; entityIndex < entityCount; entityIndex++) {
-            globalState.entities.storage.push({
+            gameState.entities.storage.push({
                 kind: EntityKind.None,
                 currentRate: 0,
                 cycleProgress: 0,
@@ -260,19 +295,19 @@ function main() {
 
         // NOTE: Temp setup some test entities
         {
-            const handle = getEntityHandleAtPos({x: 0, y: 5})
+            const handle = getEntityHandleAtPos(gameState, {x: 0, y: 5})
             if (handle?.entity !== null) {
                 handle.entity.kind = EntityKind.Generator
             }
         }
         {
-            const handle = getEntityHandleAtPos({x: 1, y: 5})
+            const handle = getEntityHandleAtPos(gameState, {x: 1, y: 5})
             if (handle?.entity !== null) {
                 handle.entity.kind = EntityKind.Motor
             }
         }
         {
-            const handle = getEntityHandleAtPos({x: 2, y: 5})
+            const handle = getEntityHandleAtPos(gameState, {x: 2, y: 5})
             if (handle?.entity !== null) {
                 handle.entity.kind = EntityKind.Producer
             }
@@ -281,7 +316,13 @@ function main() {
 
     // NOTE: Mainloop
     requestAnimationFrame((timestamp) => {
-        globalState.lastTimestamp = timestamp
-        requestAnimationFrame(gameUpdateAndRender)
+        let lastTimestamp = timestamp
+        function gameUpdateAndRenderWrapper(timestamp: number): void {
+            const deltaTime = timestamp - lastTimestamp
+            lastTimestamp = timestamp
+            gameUpdateAndRender(gameState, deltaTime)
+            requestAnimationFrame(gameUpdateAndRenderWrapper)
+        }
+        requestAnimationFrame(gameUpdateAndRenderWrapper)
     })
 }
