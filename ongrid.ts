@@ -99,6 +99,35 @@ function nextNonNullEntity(iterator: EntityIterator): EntityIterator {
     return iterator
 }
 
+function fillEntityCell(ctx: CanvasRenderingContext2D, cellLeftPx: number, cellTopPx: number, cellDimPx: number, entityKind: EntityKind): void {
+    let cellBg = "magenta"
+    let letter = "X"
+    switch (entityKind) {
+        case EntityKind.Producer: {
+            cellBg = "darkred"
+            letter = "P"
+        } break
+        case EntityKind.Motor: {
+            cellBg = "green"
+            letter = "M"
+        } break
+        case EntityKind.Generator: {
+            cellBg = "darkblue"
+            letter = "G"
+        } break
+        default: console.error(`unknown entity type: '${entityKind}'`)
+    }
+
+    ctx.fillStyle = cellBg
+    ctx.fillRect(cellLeftPx, cellTopPx, cellDimPx, cellDimPx)
+
+    ctx.fillStyle = "black"
+    ctx.textBaseline = "top"
+    ctx.textAlign = "left"
+    ctx.font = `20px monospace`
+    ctx.fillText(letter, cellLeftPx, cellTopPx)
+}
+
 function gameUpdateAndRender(gameState: GameState, deltaTime: number): void {
 
     // NOTE: Update Entities
@@ -182,47 +211,36 @@ function gameUpdateAndRender(gameState: GameState, deltaTime: number): void {
         ctx.fillText(`${Math.floor(gameState.currentNumber)}`, topMarginCenterXPx, gameState.worldMargins.top / 2)
     }
 
+    // NOTE: Store
+    {
+        const cellDimPx = gameState.cellDimPx - gameState.gridCellBorderWidthPx * 2
+        const rightMarginCenterXpx = worldDimRightPx + gameState.worldMargins.right / 2
+        const leftPx = rightMarginCenterXpx - cellDimPx / 2
+        const topPx = worldDimTopPx + gameState.gridCellBorderWidthPx
+        const storeContent = [EntityKind.Producer, EntityKind.Motor, EntityKind.Generator]
+        for (let index = 0; index < storeContent.length; index++) {
+            const entityKind = storeContent[index]
+            const cellTopPxOffset = index * gameState.cellDimPx
+            fillEntityCell(ctx, leftPx, topPx + cellTopPxOffset, cellDimPx, entityKind)
+        }
+    }
+
     // NOTE: Render Entities
     for (const entityIterator = nextNonNullEntity(beginEntityIteration(gameState)); !entityIterator.done; nextNonNullEntity(entityIterator)) {
         const entity = entityIterator.handle!.entity!
         const pos = entityIterator.handle!.pos
 
-        let cellBg = "magenta"
-        let letter = "X"
-        switch (entity.kind) {
-            case EntityKind.Producer: {
-                cellBg = "darkred"
-                letter = "P"
-            } break
-            case EntityKind.Motor: {
-                cellBg = "green"
-                letter = "M"
-            } break
-            case EntityKind.Generator: {
-                cellBg = "darkblue"
-                letter = "G"
-            } break
-            default: console.error(`unknown entity type: '${entity.kind}'`)
-        }
-
         const cellLeftPx = worldDimLeftPx + pos.x * gameState.cellDimPx + gameState.gridCellBorderWidthPx
         const cellTopPx = worldDimTopPx + pos.y * gameState.cellDimPx + gameState.gridCellBorderWidthPx
         const cellDimPx = gameState.cellDimPx - gameState.gridCellBorderWidthPx * 2
 
-        ctx.fillStyle = cellBg
-        ctx.fillRect(cellLeftPx, cellTopPx, cellDimPx, cellDimPx)
+        fillEntityCell(ctx, cellLeftPx, cellTopPx, cellDimPx, entity.kind)
 
         ctx.fillStyle = "white"
         ctx.textBaseline = "bottom"
         ctx.textAlign = "left"
         ctx.font = `10px monospace`
         ctx.fillText(`${Math.floor(entity.cycleProgress * 100)}`, cellLeftPx, cellTopPx + cellDimPx)
-
-        ctx.fillStyle = "black"
-        ctx.textBaseline = "top"
-        ctx.textAlign = "left"
-        ctx.font = `20px monospace`
-        ctx.fillText(letter, cellLeftPx, cellTopPx)
 
         const orbitingSquareDimPx = 3
         const orbitingSquareHalfDimPx = orbitingSquareDimPx / 2
@@ -245,7 +263,7 @@ function gameUpdateAndRender(gameState: GameState, deltaTime: number): void {
 }
 
 function main() {
-        
+
     let gameState: GameState = {
         lastTimestamp: 0,
         worldDim: {x: 10, y: 10},
@@ -256,7 +274,7 @@ function main() {
         referenceCycleDuration: 1000,
         cellDimPx: 50,
         gridCellBorderWidthPx: 1,
-        worldMargins: {top: 20, bottom: 30, left: 40, right: 50},
+        worldMargins: {top: 20, bottom: 30, left: 40, right: 100},
         currentNumber: 0,
     }
 

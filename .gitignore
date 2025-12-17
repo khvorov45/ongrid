@@ -1,3 +1,6 @@
 .vscode
 *.js.map
 *.js
+temp*
+*.wasm
+*.wat
